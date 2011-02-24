@@ -19,6 +19,12 @@ foreach ($output as $file) {
         continue;
     }
 
+    if(!file_exists($file)) {
+        // if the file has been moved or deleted,
+        // the old filename should be skipped
+        continue;
+    }
+
     $lint_output = array();
     exec("php -l " . escapeshellarg($file), $lint_output, $return);
     if ($return == 0) {
