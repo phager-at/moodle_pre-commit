@@ -1,4 +1,4 @@
-#!C:/xampp/php/php.exe
+#!/usr/bin/php
 <?php
 // was /usr/bin/php
 // copied from http://phpadvent.org/2008/dont-commit-that-error-by-travis-swicegood
@@ -9,8 +9,11 @@ define('USE_CODESNIFFER', true);
 if (strstr(__DIR__, "/")) {
     // Unix like systems!
     $modulepath = explode("/", __DIR__);
+    $nulldevice = '/dev/null';
 } else {
+    // Windows like systems!
     $modulepath = explode("\\", __DIR__);
+    $nulldevice = 'NUL:';
 }
 $last = count($modulepath)-1;
 unset($modulepath[$last]); // hooks directory!
@@ -19,7 +22,7 @@ $modulepath = implode('/', $modulepath);
 
 $output = array();
 $return = 0;
-$nulldevice = 'NUL:'; // /dev/null on unix
+
 exec('git rev-parse --verify HEAD 2> '.$nulldevice, $output, $return);
 $output = array();
 $against = $return == 0 ? 'HEAD' : '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
