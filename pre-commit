@@ -1,24 +1,40 @@
-#!/usr/bin/php
+#!C:/xampp/php/php.exe
 <?php
-
+// was /usr/bin/php
 // copied from http://phpadvent.org/2008/dont-commit-that-error-by-travis-swicegood
 // authored by Travis Swicegood
+// edited by Philipp Hager
+define('USE_CODESNIFFER', true);
+
+if (strstr(__DIR__, "/")) {
+    // Unix like systems!
+    $modulepath = explode("/", __DIR__);
+} else {
+    $modulepath = explode("\\", __DIR__);
+}
+$last = count($modulepath)-1;
+unset($modulepath[$last]); // hooks directory!
+unset($modulepath[$last-1]); // .git directory!
+$modulepath = implode('/', $modulepath);
+
 $output = array();
 $return = 0;
-exec('git rev-parse --verify HEAD 2> /dev/null', $output, $return);
+$nulldevice = 'NUL:'; // /dev/null on unix
+exec('git rev-parse --verify HEAD 2> '.$nulldevice, $output, $return);
+$output = array();
 $against = $return == 0 ? 'HEAD' : '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
-
 exec("git diff-index --cached --name-only {$against}", $output);
-
 $filename_pattern = '/\.ph(tml|p)$/';
 $exit_status = 0;
-
+// PHP Lint
+echo "*****************************************\n".
+     "************* PHPLint check *************\n".
+     "*****************************************\n";
 foreach ($output as $file) {
     if (!preg_match($filename_pattern, $file)) {
         // don't check files that aren't PHP
         continue;
     }
-
     if(!file_exists($file)) {
         // if the file has been moved or deleted,
         // the old filename should be skipped
@@ -26,12 +42,215 @@ foreach ($output as $file) {
     }
 
     $lint_output = array();
-    exec("php -l " . escapeshellarg($file), $lint_output, $return);
+    exec("php -l " . escapeshellarg($file)." 2>&1", $lint_output, $return);
     if ($return == 0) {
+        echo "\033[32m$file...OK\033[39m\n";
+        continue;
+    } else {
+        echo "\033[31m$file...failed\033[39m\n";
+    }
+    echo implode("\n", $lint_output)."\n";
+    $exit_status = 1;
+}
+// JS Lint
+$filename_pattern = '/\.js$/';
+$minified_pattern = '/\.min\.js$/';
+$uglify = false;
+echo "*****************************************\n".
+     "************* JS Hint check *************\n".
+     "*****************************************\n";
+foreach ($output as $file) {
+    if (!preg_match($filename_pattern, $file) || preg_match($minified_pattern, $file)) {
+        // don't check files that aren't JS or are minified JS
         continue;
     }
-    echo implode("\n", $lint_output), "\n";
+    if(!file_exists($file)) {
+        // if the file has been moved or deleted,
+        // the old filename should be skipped
+        continue;
+    }
+
+    $jshint_output = array();
+    $uglify = true;
+    exec("jshint " . escapeshellarg($file)." 2>&1", $jshint_output, $return);
+    if ($return == 0) {
+        echo "\033[32m$file...OK\033[39m\n";
+        continue;
+    } else {
+        echo "\033[31m$file...failed\033[39m\n";
+    }
+    echo implode("\n", $jshint_output)."\n";
+    $uglify = false;
+    $exit_status = 1;
+}
+if ($uglify) {
+    echo "\n\n*** Uglify JS ***\n";
+    $uglifyoutput = array();
+    exec("grunt uglify", $uglifyoutput, $return);
+    echo implode("\n", $uglifyoutput), "\n";
+}
+// CSS Lint
+$filename_pattern = '/\.css$/';
+echo "*****************************************\n".
+     "************* CSSLint check *************\n".
+     "*****************************************\n";
+foreach ($output as $file) {
+    if (!preg_match($filename_pattern, $file)) {
+        // don't check files that aren't CSS
+        continue;
+    }
+    if(!file_exists($file)) {
+        // if the file has been moved or deleted,
+        // the old filename should be skipped
+        continue;
+    }
+
+    $csslint_output = array();
+    exec("csslint " . escapeshellarg($file)." 2>&1", $csslint_output, $return);
+    if ($return == 0) {
+        echo "\033[32m$file...OK\033[39m\n";
+        continue;
+    } else {
+        echo "\033[31m$file...failed\033[39m\n";
+    }
+    echo implode("\n", $csslint_output)."\n";
     $exit_status = 1;
 }
 
+// Codechecker if installed
+if (file_exists(__DIR__ . "/../../../../local/codechecker/version.php") && USE_CODESNIFFER) {
+    echo "*****************************************\n".
+         "************** Codechecker **************\n".
+         "*****************************************\n";
+    define('CLI_SCRIPT', 1);
+    require_once(__DIR__ . '/../../../../config.php');
+    require_once($CFG->libdir . '/adminlib.php');
+    require_once($CFG->dirroot . '/local/codechecker/locallib.php');
+
+    $ccoutput = $PAGE->get_renderer('local_codechecker');
+    $reportfile = make_temp_directory('phpcs') . '/phpcs_' . random_string(10) . '.xml';
+    $phpcs = new PHP_CodeSniffer();
+    $cli = new local_codechecker_codesniffer_cli();
+    $cli->setReport('local_codechecker'); // Using own custom xml format for easier handling later.
+    $cli->setReportFile($reportfile); // Send the report to dataroot temp.
+    $cli->setIncludeWarnings(true); // Decide if we want to show warnings (defaults yes).
+    $phpcs->setCli($cli);
+    $phpcs->setIgnorePatterns(local_codesniffer_get_ignores('*/build/*'));
+    $csfiles = array();
+    foreach ($output as $key => $file) {
+        if ($file == "README.txt") {
+            // Skip README.txt!
+            continue;
+        }
+        $csfiles[$key] = $modulepath.'/'.$file;
+    }
+    $phpcs->process($csfiles, local_codechecker_clean_path($CFG->dirroot . '/local/codechecker/moodle'));
+    // Save the xml report file to dataroot/temp.
+    $phpcs->reporting->printReport('local_codechecker', false, $cli->getCommandLineValues(), $reportfile);
+    // Load the XML file to proceed with the rest of checks.
+    $xml = simplexml_load_file($reportfile);
+
+    // Look for other problems, not handled by codesniffer.
+    foreach ($csfiles as $file) {
+        local_codechecker_check_other_files($file, $xml);
+    }
+    list($numerrors, $numwarnings) = local_codechecker_count_problems($xml);
+
+    // Output the results report.
+    if ($numerrors > 0 || $numwarnings > 0) {
+        $grandsummary = get_string('numerrorswarnings', 'local_codechecker',
+                array('errors' => $numerrors, 'warnings' => $numwarnings));
+        if ($numerrors) {
+            $grandtype = 'fail error';
+        } else {
+            $grandtype = 'fail warning';
+        }
+
+        $files = $xml->xpath('file');
+        $sortedfiles = array();
+        foreach ($files as $fileinxml) {
+            $sortedfiles[local_codechecker_pretty_path($fileinxml['name'])] = $fileinxml;
+        }
+        ksort($sortedfiles);
+        $files = $sortedfiles;
+
+        // Files count and list.
+        $numfiles = count($files);
+        echo get_string('filesfound', 'local_codechecker', $numfiles)."\n".
+             "--------------------\n\n";
+
+        // Details.
+        $index = 0;
+        foreach ($files as $prettypath => $fileinxml) {
+            $index++;
+
+            if ($fileinxml['errors'] + $fileinxml['warnings'] == 0) {
+                continue;
+            }
+
+            echo s($prettypath).":\n";
+
+            foreach ($fileinxml->xpath('error|warning') as $problem) {
+                $lastfileandline = ''; // To detect changes of line.
+                $line = $problem['line'];
+                $level = $problem->getName();
+
+                $code = '';
+                switch($level) {
+                    case 'warning':
+                        $color = "\033[31m";
+                    break;
+                    case 'error':
+                        $color = "\033[33m";
+                    break;
+                    default:
+                        $color = "\033[39m";
+                    break;
+                }
+                $stdcolor = "\033[39m";
+                if ($lastfileandline !== $prettypath . '#@#' . $line) {
+                    $code = s(local_codechecker_get_line_of_code($line, $prettypath));
+                    $codes = str_split(trim($code), 62);
+                    $problems = str_split($problem, 62);
+                    $curline = $line;
+                    $curlvl = $level;
+                    foreach ($problems as $cur) {
+                        echo sprintf("%s%' 5s%s | %s%7s%s | %s", $color, $curline, $stdcolor, $color, $curlvl, $stdcolor, $cur)."\n";
+                        $curline = '';
+                        $curlvl = '';
+                    }
+                    foreach ($codes as $cur) {
+                        echo sprintf("%' 5s | %7s | %s", '', '', "\033[36m".$cur.$stdcolor)."\n";
+                    }
+                    $lastfileandline = $prettypath . '#@#' . $line;
+                } else {
+                    $code = s(local_codechecker_get_line_of_code($line, $prettypath));
+                    $codes = str_split(trim($code), 62);
+                    $problems = str_split($problem, 62);
+                    $curlvl = $level;
+                    foreach ($problems as $cur) {
+                        echo sprintf("%' 5s | %s%7s%s | %s", '', $color, $curlvl, $stdcolor, $cur)."\n";
+                        $curlvl = '';
+                    }
+                    foreach ($codes as $cur) {
+                        echo sprintf("%' 5s | %7s | %s", '', '', "\033[36m".$cur.$stdcolor)."\n";
+                    }
+                }
+            }
+        }
+        $exit_status = 1;
+    }
+
+    // And clean the report temp file.
+    @unlink($reportfile);
+}
+if ($exit_status == 0) {
+    echo "\n\n-------------------------------------------\n".
+         "--- \033[32mNo problems detected!\033[39m\n".
+         "-------------------------------------------\n";
+} else {
+    echo "\n\n-------------------------------------------\n".
+         "--- \033[31mProblems detected!\033[39m\n".
+         "-------------------------------------------\n";
+}
 exit($exit_status);
