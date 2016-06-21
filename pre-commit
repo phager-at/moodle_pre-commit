@@ -6,7 +6,7 @@
 // edited by Philipp Hager
 define('USE_CODESNIFFER', true);
 
-if (strstr(__DIR__, "/")) {
+if (DIRECTORY_SEPARATOR == "/") {
     // Unix like systems!
     $modulepath = explode("/", __DIR__);
 } else {
@@ -15,7 +15,7 @@ if (strstr(__DIR__, "/")) {
 $last = count($modulepath)-1;
 unset($modulepath[$last]); // hooks directory!
 unset($modulepath[$last-1]); // .git directory!
-$modulepath = implode('/', $modulepath);
+$modulepath = implode(DIRECTORY_SEPARATOR, $modulepath);
 
 $output = array();
 $return = 0;
@@ -142,7 +142,13 @@ if (file_exists(__DIR__ . "/../../../../local/codechecker/version.php") && USE_C
             // Skip README.txt!
             continue;
         }
-        $csfiles[$key] = $modulepath.'/'.$file;
+        if (DIRECTORY_SEPARATOR == "/") {
+            // Unix like systems!
+            $file = str_replace("\\", DIRECTORY_SEPARATOR, $file);
+        } else {
+            $file = str_replace("/", DIRECTORY_SEPARATOR, $file);
+        }
+        $csfiles[$key] = $modulepath . DIRECTORY_SEPARATOR . $file;
     }
     $phpcs->process($csfiles, local_codechecker_clean_path($CFG->dirroot . '/local/codechecker/moodle'));
     // Save the xml report file to dataroot/temp.
