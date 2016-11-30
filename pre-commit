@@ -87,10 +87,12 @@ foreach ($output as $file) {
     $exit_status = 1;
 }
 if ($uglify) {
+    chdir("../..");
     echo "\n\n*** Uglify JS ***\n";
     $uglifyoutput = array();
     exec("grunt uglify", $uglifyoutput, $return);
     echo implode("\n", $uglifyoutput), "\n";
+    chdir($modulepath);
 }
 // CSS Lint
 $filename_pattern = '/\.css$/';
@@ -141,15 +143,21 @@ if (file_exists(__DIR__ . "/../../../../local/codechecker/version.php") && USE_C
     $phpcs->setIgnorePatterns(local_codesniffer_get_ignores('*/build/*'));
     $csfiles = array();
     foreach ($output as $key => $file) {
-        if ($file == "README.txt") {
-            // Skip README.txt!
-            continue;
-        }
         if (DIRECTORY_SEPARATOR == "/") {
             // Unix like systems!
             $file = str_replace("\\", DIRECTORY_SEPARATOR, $file);
         } else {
             $file = str_replace("/", DIRECTORY_SEPARATOR, $file);
+        }
+        if ($file == "README.txt" || $file == "README.md" || $file == "CHANGELOG.txt"
+                || $file == "db".DIRECTORY_SEPARATOR."install.xml"
+                || strstr($file, ".png") || strstr($file, ".svg") || strstr($file, ".txt")) {
+            // Skip README, CHANGELOG, images and db\install.xml!
+            continue;
+        }
+        if(!file_exists($file)) {
+            // Skip non-existing files!
+            continue;
         }
         $csfiles[$key] = $modulepath . DIRECTORY_SEPARATOR . $file;
     }
